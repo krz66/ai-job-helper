@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI求职助手</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,sans-serif}
+        body{background:#eef2f5;display:flex;height:100vh}
+        .sidebar{width:210px;background:#fff;border-right:1px solid #dde3ea;padding:22px 12px;display:flex;flex-direction:column}
+        .sidebar-header{font-size:22px;font-weight:700;color:#165DFF;margin-bottom:28px}
+        .menu-item{padding:12px 14px;margin-bottom:8px;border-radius:10px;cursor:pointer;color:#333;font-size:15px}
+        .menu-item.active{background:#165DFF;color:#fff}
+        .resume-card{margin-top:auto;background:#f7f9fc;border-radius:10px;padding:14px}
+        .resume-status{font-size:12px;padding:2px 8px;border-radius:12px;background:#FF9500;color:#fff}
+        .status-set{background:#0FAF62}
+        .main{flex:1;display:flex;flex-direction:column;padding:24px}
+        .chat-container{flex:1;background:#fff;border-radius:18px;padding:24px;overflow-y:auto;margin-bottom:16px}
+        .input-area{background:#fff;border-radius:18px;padding:18px;display:flex;gap:12px;align-items:flex-end}
+        .upload-btn{width:56px;height:56px;background:#0FAF62;border-radius:14px;display:grid;place-items:center;color:#fff;font-size:24px;cursor:pointer}
+        .input-box{flex:1;border:1px solid #dde3ea;border-radius:14px;padding:16px;min-height:100px;font-size:16px;resize:none;background:#fafbfc}
+        .input-box:focus{outline:none;border-color:#165DFF;background:#fff}
+        .btn{padding:14px 24px;border:none;border-radius:12px;font-size:15px;cursor:pointer}
+        .btn-send{background:#165DFF;color:#fff}
+        .btn-cancel{background:#FF3B30;color:#fff}
+        .message{max-width:90%;padding:14px 16px;border-radius:14px;margin-bottom:12px;white-space:pre-wrap;word-wrap:break-word;line-height:1.6}
+        .user-message{background:#165DFF;color:#fff;margin-left:auto}
+        .ai-message{background:#f1f3f5;color:#222;margin-right:auto}
+        .loading{color:#165DFF;font-weight:bold}
+        .success{color:#0FAF62;font-weight:bold}
+        .error{color:#FF3B30;font-weight:bold}
+        .cancel{color:#FF9500;font-weight:bold}
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">🤖 AI求职助手</div>
+        <div class="menu-item active" data-mode="extract">📄 简历信息抽取</div>
+        <div class="menu-item" data-mode="polish">✨ 简历智能润色</div>
+        <div class="menu-item" data-mode="match">💼 岗位匹配分析</div>
+        <div class="menu-item" data-mode="interview">🎤 面试题库生成</div>
+        <div class="menu-item" data-mode="qa">💡 求职智能问答</div>
+        <div class="resume-card">
+            <div style="font-size:14px;margin-bottom:6px">默认简历</div>
+            <div id="resumeStatus" class="resume-status">未设置</div>
+            <div style="font-size:12px;color:#666;margin-top:8px">💡 上传请按文件按钮</div>
+        </div>
+    </div>
+    <div class="main">
+        <div class="chat-container" id="chatContainer"></div>
+        <div class="input-area">
+            <div class="upload-btn" id="uploadBtn">📁</div>
+            <input type="file" id="fileInput" accept=".docx,.txt,.md" hidden>
+            <textarea class="input-box" id="userInput" placeholder="请输入内容..."></textarea>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-send" id="sendBtn">发送</button>
+                <button class="btn btn-cancel" id="cancelBtn">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentMode = "extract";
+        let loading = false;
+        let controller = null;
+        const chat = document.getElementById("chatContainer");
+
+        // 提示工具函数
+        function showMessage(text, type) {
+            const div = document.createElement("div");
+            div.className = `message ai-message ${type}`;
+            div.textContent = text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // ====================== 这里是修复的代码 ======================
+        window.onload = async () => {
+            try {
+                const res = await fetch('/get_default_resume');
+                const data = await res.json();
+                const statusEl = document.getElementById('resumeStatus');
+                if (data.has_default) {
+                    statusEl.textContent = "已设置";
+                    statusEl.classList.add("status-set");
+                } else {
+                    statusEl.textContent = "未设置";
+                    statusEl.classList.remove("status-set");
+                }
+            } catch (e) {
+                console.error("获取默认简历状态失败:", e);
+            }
+        };
+        // ===============================================================
+
+        document.querySelectorAll(".menu-item").forEach(item => {
+            item.onclick = () => {
+                document.querySelectorAll(".menu-item").forEach(i => i.classList.remove("active"));
+                item.classList.add("active");
+                currentMode = item.dataset.mode;
+            }
+        });
+
+        document.getElementById("sendBtn").onclick = async () => {
+            const text = document.getElementById("userInput").value.trim();
+            if (!text || loading) return;
+
+            loading = true;
+            controller = new AbortController();
+
+            const userMsg = document.createElement("div");
+            userMsg.className = "message user-message";
+            userMsg.textContent = text;
+            chat.appendChild(userMsg);
+
+            // 加载中提示
+            showMessage("⏳ AI正在处理，请稍候...", "loading");
+
+            document.getElementById("userInput").value = "";
+            chat.scrollTop = chat.scrollHeight;
+
+            try {
+                const res = await fetch("/process", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode: currentMode, text }),
+                    signal: controller.signal
+                });
+                const data = await res.json();
+                chat.removeChild(chat.lastChild);
+
+                if (data.result) {
+                    showMessage("✅ " + data.result, "success");
+                } else if (data.error) {
+                    showMessage("❌ 错误：" + data.error, "error");
+                }
+            } catch (e) {
+                chat.removeChild(chat.lastChild);
+                if (e.name === "AbortError") {
+                    showMessage("⏹️ 已取消请求", "cancel");
+                } else {
+                    showMessage("❌ 网络或服务异常", "error");
+                }
+            } finally {
+                loading = false;
+                controller = null;
+            }
+        };
+
+        document.getElementById("cancelBtn").onclick = () => {
+            document.getElementById("userInput").value = "";
+            if (controller) controller.abort();
+        };
+
+        document.getElementById("uploadBtn").onclick = () => document.getElementById("fileInput").click();
+        document.getElementById("fileInput").onchange = async e => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("mode", currentMode);
+            fd.append("set_as_default", "true");
+
+            showMessage("📤 正在上传并解析文件...", "loading");
+
+            try {
+                const res = await fetch("/upload_and_process", { method: "POST", body: fd });
+                const data = await res.json();
+                chat.removeChild(chat.lastChild);
+
+                if (data.result) {
+                    showMessage("✅ 解析完成：" + data.result, "success");
+                    document.getElementById("resumeStatus").textContent = "已设置";
+                    document.getElementById("resumeStatus").classList.add("status-set");
+                } else {
+                    showMessage("❌ 上传失败：" + data.error, "error");
+                }
+            } catch (err) {
+                chat.removeChild(chat.lastChild);
+                showMessage("❌ 上传异常，请重试", "error");
+            }
+            e.target.value = "";
+        };
+    </script>
+</body>
+</html>
